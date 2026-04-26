@@ -14,3 +14,6 @@ deploy:
 
 run script:
   npx hardhat run scripts/{{script}}.ts --network localhost
+
+test:
+  npx hardhat test
