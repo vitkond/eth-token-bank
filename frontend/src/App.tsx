@@ -8,6 +8,7 @@ const bankAbi = [
   "function deposit(uint256 amount)",
   "function deposits(address user) view returns (uint256)",
   "function bankTokenBalance() view returns (uint256)",
+  "function withdraw(uint256 amount)",
 ];
 
 const tokenAbi = [
@@ -76,6 +77,30 @@ function App() {
     setStatus("Deposit complete");
   }
 
+  async function withdraw() {
+    if (!window.ethereum || !account) return;
+
+    const provider = new ethers.BrowserProvider(window.ethereum);
+    const signer = await provider.getSigner();
+
+    const token = new ethers.Contract(tokenAddress, tokenAbi, signer);
+    const bank = new ethers.Contract(bankAddress, bankAbi, signer);
+
+    const amount = ethers.parseUnits(depositAmount, 18);
+
+    setStatus("Withdrawing...");
+    const withdrawTx = await bank.withdraw(amount);
+    await withdrawTx.wait();
+
+    const newTokenBalance = await token.balanceOf(account);
+    const newBankDeposit = await bank.deposits(account);
+
+    setTokenBalance(ethers.formatUnits(newTokenBalance, 18));
+    setBankDeposit(ethers.formatUnits(newBankDeposit, 18));
+
+    setStatus("Withdraw complete");
+  }
+
   return (
       <div style={{ padding: 20 }}>
         <h2>Token Bank</h2>
@@ -98,6 +123,8 @@ function App() {
                 />
 
                 <button onClick={deposit}>Deposit</button>
+
+                <button onClick={withdraw}>Withdraw</button>
 
                 <p>{status}</p>
               </div>
