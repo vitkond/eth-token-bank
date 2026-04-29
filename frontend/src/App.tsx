@@ -1,170 +1,173 @@
-import { useState, useEffect } from "react";
-import { ethers } from "ethers";
+import {useState} from "react";
+import {ethers} from "ethers";
 
 const tokenAddress = import.meta.env.VITE_TOKEN_ADDRESS;
 const bankAddress = import.meta.env.VITE_BANK_ADDRESS;
 
 const bankAbi = [
-  "function deposit(uint256 amount)",
-  "function deposits(address user) view returns (uint256)",
-  "function bankTokenBalance() view returns (uint256)",
-  "function withdraw(uint256 amount)",
+    "function deposit(uint256 amount)",
+    "function deposits(address user) view returns (uint256)",
+    "function bankTokenBalance() view returns (uint256)",
+    "function withdraw(uint256 amount)",
 ];
 
 const tokenAbi = [
-  "function name() view returns (string)",
-  "function symbol() view returns (string)",
-  "function balanceOf(address account) view returns (uint256)",
-  "function approve(address spender, uint256 amount) returns (bool)",
+    "function name() view returns (string)",
+    "function symbol() view returns (string)",
+    "function balanceOf(address account) view returns (uint256)",
+    "function approve(address spender, uint256 amount) returns (bool)",
+    "function allowance(address owner, address spender) view returns (uint256)",
 ];
 
 function App() {
-  const [account, setAccount] = useState<string | null>(null);
-  const [tokenSymbol, setTokenSymbol] = useState<string>("");
-  const [tokenBalance, setTokenBalance] = useState<string>("");
-  const [depositAmount, setDepositAmount] = useState<string>("100");
-  const [bankDeposit, setBankDeposit] = useState<string>("0");
-  const [status, setStatus] = useState<string>("");
+    const [account, setAccount] = useState<string | null>(null);
+    const [tokenSymbol, setTokenSymbol] = useState<string>("");
+    const [tokenBalance, setTokenBalance] = useState<string>("");
+    const [depositAmount, setDepositAmount] = useState<string>("100");
+    const [bankDeposit, setBankDeposit] = useState<string>("0");
+    const [status, setStatus] = useState<string>("");
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState("");
 
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      const current = await getCurrentAccount();
+    async function connectWallet() {
+        console.log("connectWallet called");
+        if (!window.ethereum) {
+            alert("Install MetaMask");
+            return;
+        }
 
-      if (!current) return;
+        const provider = new ethers.BrowserProvider(window.ethereum);
+        const accounts = await provider.send("eth_requestAccounts", []);
 
-      if (current !== account) {
-        console.log("Account changed manually:", current);
-        await loadAccountData(current);
-      }
-    }, 1000); 
-
-    return () => clearInterval(interval);
-  }, [account]);
-
-  async function getCurrentAccount() {
-    if (!window.ethereum) return null;
-
-    const accounts = await window.ethereum.request({
-      method: "eth_accounts",
-    });
-
-    return accounts[0] || null;
-  }
-
-  async function connectWallet() {
-    if (!window.ethereum) {
-      alert("Install MetaMask");
-      return;
+        await loadAccountData(accounts[0]);
     }
 
-    const provider = new ethers.BrowserProvider(window.ethereum);
-    const accounts = await provider.send("eth_requestAccounts", []);
+    const refreshData = async (userAddress = account) => {
+        if (!userAddress) return;
+        await loadAccountData(userAddress);
+    }
 
-    await loadAccountData(accounts[0]);
-  }
+    async function deposit() {
+        if (!window.ethereum || !account || isLoading) return;
 
-  const deposit = async ()=> {
-    if (!window.ethereum || !account) return;
+        setIsLoading(true);
+        setError("");
 
-    const provider = new ethers.BrowserProvider(window.ethereum);
-    const signer = await provider.getSigner();
+        try {
+            const provider = new ethers.BrowserProvider(window.ethereum);
+            const signer = await provider.getSigner();
 
-    const token = new ethers.Contract(tokenAddress, tokenAbi, signer);
-    const bank = new ethers.Contract(bankAddress, bankAbi, signer);
+            const token = new ethers.Contract(tokenAddress, tokenAbi, signer);
+            const bank = new ethers.Contract(bankAddress, bankAbi, signer);
 
-    const amount = ethers.parseUnits(depositAmount, 18);
+            const amount = ethers.parseUnits(depositAmount, 18);
 
-    setStatus("Approving...");
-    const approveTx = await token.approve(bankAddress, amount);
-    await approveTx.wait();
+            const currentAllowance = await token.allowance(account, bankAddress);
 
-    setStatus("Depositing...");
-    const depositTx = await bank.deposit(amount);
-    await depositTx.wait();
+            if (currentAllowance < amount) {
+                setStatus("Approving...");
+                const approveTx = await token.approve(bankAddress, ethers.MaxUint256);
+                await approveTx.wait();
+            }
 
-    const newTokenBalance = await token.balanceOf(account);
-    const newBankDeposit = await bank.deposits(account);
+            setStatus("Depositing...");
+            const depositTx = await bank.deposit(amount);
+            await depositTx.wait();
 
-    setTokenBalance(ethers.formatUnits(newTokenBalance, 18));
-    setBankDeposit(ethers.formatUnits(newBankDeposit, 18));
+            await refreshData(account);
+            setStatus("Deposit complete");
+        } catch (e: any) {
+            console.error(e);
+            setError(e?.code === "ACTION_REJECTED" ? "Transaction cancelled" : "Transaction failed");
+            setStatus("");
+        } finally {
+            setIsLoading(false);
+        }
+    }
 
-    setStatus("Deposit complete");
-  }
+    async function withdraw() {
+        if (!window.ethereum || !account || isLoading) return;
 
-  const withdraw = async  ()=> {
-    if (!window.ethereum || !account) return;
+        setIsLoading(true);
+        setError("");
 
-    const provider = new ethers.BrowserProvider(window.ethereum);
-    const signer = await provider.getSigner();
+        try {
+            const provider = new ethers.BrowserProvider(window.ethereum);
+            const signer = await provider.getSigner();
 
-    const token = new ethers.Contract(tokenAddress, tokenAbi, signer);
-    const bank = new ethers.Contract(bankAddress, bankAbi, signer);
+            const bank = new ethers.Contract(bankAddress, bankAbi, signer);
 
-    const amount = ethers.parseUnits(depositAmount, 18);
+            const amount = ethers.parseUnits(depositAmount, 18);
 
-    setStatus("Withdrawing...");
-    const withdrawTx = await bank.withdraw(amount);
-    await withdrawTx.wait();
+            setStatus("Withdrawing...");
+            const withdrawTx = await bank.withdraw(amount);
+            await withdrawTx.wait();
 
-    const newTokenBalance = await token.balanceOf(account);
-    const newBankDeposit = await bank.deposits(account);
+            await refreshData(account);
+            setStatus("Withdraw complete");
+        } catch (e: any) {
+            console.error(e);
+            setError(e?.code === "ACTION_REJECTED" ? "Transaction cancelled" : "Transaction failed");
+            setStatus("");
+        } finally {
+            setIsLoading(false);
+        }
+    }
 
-    setTokenBalance(ethers.formatUnits(newTokenBalance, 18));
-    setBankDeposit(ethers.formatUnits(newBankDeposit, 18));
+    async function loadAccountData(userAddress: string) {
+        if (!window.ethereum) return;
 
-    setStatus("Withdraw complete");
-  }
+        const provider = new ethers.BrowserProvider(window.ethereum);
 
-  async function loadAccountData(userAddress: string) {
-    if (!window.ethereum) return;
+        const token = new ethers.Contract(tokenAddress, tokenAbi, provider);
+        const bank = new ethers.Contract(bankAddress, bankAbi, provider);
 
-    const provider = new ethers.BrowserProvider(window.ethereum);
-    const signer = await provider.getSigner();
+        const symbol = await token.symbol();
+        const balance = await token.balanceOf(userAddress);
+        const deposit = await bank.deposits(userAddress);
 
-    const token = new ethers.Contract(tokenAddress, tokenAbi, signer);
-    const bank = new ethers.Contract(bankAddress, bankAbi, signer);
+        setAccount(userAddress);
+        setTokenSymbol(symbol);
+        setTokenBalance(ethers.formatUnits(balance, 18));
+        setBankDeposit(ethers.formatUnits(deposit, 18));
+    }
 
-    const symbol = await token.symbol();
-    const balance = await token.balanceOf(userAddress);
-    const deposit = await bank.deposits(userAddress);
+    return (
+        <div style={{padding: 20}}>
+            <h2>Token Bank</h2>
 
-    setAccount(userAddress);
-    setTokenSymbol(symbol);
-    setTokenBalance(ethers.formatUnits(balance, 18));
-    setBankDeposit(ethers.formatUnits(deposit, 18));
-  }
+            {!account ? (
+                <button onClick={connectWallet}>Connect MetaMask</button>
+            ) : (
+                <>
+                    <p>Connected: {account}</p>
+                    <p>
+                        Balance: {tokenBalance} {tokenSymbol}
+                    </p>
+                    <div>
+                        <p>Bank deposit: {bankDeposit} {tokenSymbol}</p>
 
-  return (
-      <div style={{ padding: 20 }}>
-        <h2>Token Bank</h2>
+                        <input
+                            value={depositAmount}
+                            onChange={(e) => setDepositAmount(e.target.value)}
+                            placeholder="Amount"
+                        />
 
-        {!account ? (
-            <button onClick={connectWallet}>Connect MetaMask</button>
-        ) : (
-            <>
-              <p>Connected: {account}</p>
-              <p>
-                Balance: {tokenBalance} {tokenSymbol}
-              </p>
-              <div>
-                <p>Bank deposit: {bankDeposit} {tokenSymbol}</p>
+                        <button onClick={deposit} disabled={isLoading || !account}>
+                            {isLoading ? "Processing..." : "Deposit"}
+                        </button>
 
-                <input
-                    value={depositAmount}
-                    onChange={(e) => setDepositAmount(e.target.value)}
-                    placeholder="Amount"
-                />
-
-                <button onClick={deposit}>Deposit</button>
-
-                <button onClick={withdraw}>Withdraw</button>
-
-                <p>{status}</p>
-              </div>
-            </>
-        )}
-      </div>
-  );
+                        <button onClick={withdraw} disabled={isLoading || !account}>
+                            {isLoading ? "Processing..." : "Withdraw"}
+                        </button>
+                        
+                    </div>
+                </>
+            )}
+            {status && <p>{status}</p>}
+            {error && <p style={{ color: "red" }}>{error}</p>}
+        </div>
+    );
 }
 
 export default App;
