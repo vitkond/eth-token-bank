@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ethers } from "ethers";
 
 const tokenAddress = import.meta.env.VITE_TOKEN_ADDRESS;
@@ -26,6 +26,31 @@ function App() {
   const [bankDeposit, setBankDeposit] = useState<string>("0");
   const [status, setStatus] = useState<string>("");
 
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      const current = await getCurrentAccount();
+
+      if (!current) return;
+
+      if (current !== account) {
+        console.log("Account changed manually:", current);
+        await loadAccountData(current);
+      }
+    }, 1000); 
+
+    return () => clearInterval(interval);
+  }, [account]);
+
+  async function getCurrentAccount() {
+    if (!window.ethereum) return null;
+
+    const accounts = await window.ethereum.request({
+      method: "eth_accounts",
+    });
+
+    return accounts[0] || null;
+  }
+
   async function connectWallet() {
     if (!window.ethereum) {
       alert("Install MetaMask");
@@ -35,18 +60,7 @@ function App() {
     const provider = new ethers.BrowserProvider(window.ethereum);
     const accounts = await provider.send("eth_requestAccounts", []);
 
-    const signer = await provider.getSigner();
-    const userAddress = accounts[0];
-
-    const token = new ethers.Contract(tokenAddress, tokenAbi, signer);
-
-    const symbol = await token.symbol();
-    const balance = await token.balanceOf(userAddress);
-
-    setAccount(userAddress);
-    setTokenSymbol(symbol);
-    setTokenBalance(ethers.formatUnits(balance, 18));
-    console.log("Frontend account:", userAddress);
+    await loadAccountData(accounts[0]);
   }
 
   const deposit = async ()=> {
@@ -77,7 +91,7 @@ function App() {
     setStatus("Deposit complete");
   }
 
-  async function withdraw() {
+  const withdraw = async  ()=> {
     if (!window.ethereum || !account) return;
 
     const provider = new ethers.BrowserProvider(window.ethereum);
@@ -99,6 +113,25 @@ function App() {
     setBankDeposit(ethers.formatUnits(newBankDeposit, 18));
 
     setStatus("Withdraw complete");
+  }
+
+  async function loadAccountData(userAddress: string) {
+    if (!window.ethereum) return;
+
+    const provider = new ethers.BrowserProvider(window.ethereum);
+    const signer = await provider.getSigner();
+
+    const token = new ethers.Contract(tokenAddress, tokenAbi, signer);
+    const bank = new ethers.Contract(bankAddress, bankAbi, signer);
+
+    const symbol = await token.symbol();
+    const balance = await token.balanceOf(userAddress);
+    const deposit = await bank.deposits(userAddress);
+
+    setAccount(userAddress);
+    setTokenSymbol(symbol);
+    setTokenBalance(ethers.formatUnits(balance, 18));
+    setBankDeposit(ethers.formatUnits(deposit, 18));
   }
 
   return (
